@@ -1,14 +1,8 @@
-import re
-from pathlib import Path
+import logging
 
-from bs4 import BeautifulSoup
-
-from excel_converter import process_folder_to_excel_per_html
+from excel_converter import process_folder_to_excel
 from report_modifier import process_all_html_files
 
-# =========================
-# Shared Config (single place)
-# =========================
 CONFIG = {
     "ORIGINAL_ROOT": r"C:\Users\hyper.park\PycharmProjects\VCReportModifier\Security",
     "NEW_ROOT": r"C:\Users\hyper.park\PycharmProjects\VCReportModifier\SecurityFixed",
@@ -16,6 +10,7 @@ CONFIG = {
     "OUTPUT_XLSX_PATH": r"C:\Users\hyper.park\PycharmProjects\VCReportModifier\Security_TCNames.xlsx",
     "OVERWRITE_NEW_ROOT": True,
     "RECURSIVE_SEARCH": True,
+    "ENABLE_TIME_LOG": True,
     "TEST_START_DATE": "01 MAY 2026  1:00:00 PM",
     "EXECUTION_START_DATE": "04 MAY 2026  9:00:00 AM",
     "DATE_FORMAT": "%d %b %Y  %I:%M:%S %p",
@@ -32,32 +27,12 @@ CONFIG = {
     },
 }
 
-
-def clean_text(text: str) -> str:
-    return "" if text is None else " ".join(text.split()).strip()
-
-
-def read_html_soup(html_path: Path):
-    try:
-        html = html_path.read_text(encoding="utf-8", errors="ignore")
-    except Exception:
-        html = html_path.read_text(encoding="cp949", errors="ignore")
-    return BeautifulSoup(html, "html.parser")
-
-
-def safe_name(text: str) -> str:
-    text = re.sub(r"\([^)]*\)", "", clean_text(text)).replace("::", "_")
-    return re.sub(r"_+", "_", re.sub(r"[^A-Za-z0-9_]+", "_", text)).strip("_")
-
-
-def extract_func_name(subprogram: str) -> str:
-    subprogram = re.sub(r"\([^)]*\)", "", clean_text(subprogram))
-    return subprogram.split("::")[-1].strip() if "::" in subprogram else subprogram.strip()
+logging.basicConfig(filename="UnitTC.log", filemode="w", level=logging.DEBUG, format="%(asctime)s %(levelname)s %(message)s")
 
 
 def main():
-    process_all_html_files(CONFIG, clean_text, read_html_soup, safe_name, extract_func_name)
-    process_folder_to_excel_per_html(CONFIG, clean_text, read_html_soup)
+    process_all_html_files(CONFIG)
+    process_folder_to_excel(CONFIG)
 
 
 if __name__ == "__main__":
