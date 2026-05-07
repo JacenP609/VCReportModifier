@@ -30,7 +30,7 @@ SWE4_JSON_ROOT = r"C:\Users\hyper.park\PycharmProjects\VCReportModifier\SWE4_Jso
 # If you run HTML modification first, keep this as NEW_ROOT.
 INPUT_ROOT = NEW_ROOT
 
-OUTPUT_XLSX_PATH = r"C:\Users\hyper.park\PycharmProjects\VCReportModifier\Security_TCNames.xlsx"
+OUTPUT_XLSX_ROOT = r"C:\Users\hyper.park\PycharmProjects\VCReportModifier\Security_TCNames"
 
 OVERWRITE_NEW_ROOT = True
 RECURSIVE_SEARCH = True
@@ -39,6 +39,7 @@ LOG_PATH = "UnitTC.log"
 ENABLE_TIME_LOG = True
 
 TEST_START_DATE = "01 MAY 2026  1:00:00 PM"
+TEST_END_DATE = "31 MAY 2026  6:00:00 PM"
 EXECUTION_START_DATE = "04 MAY 2026  9:00:00 AM"
 
 DATE_FORMAT = "%d %b %Y  %I:%M:%S %p"
@@ -50,6 +51,14 @@ CREATION_MAX_STEP_MINUTES = 20
 
 EXECUTION_STEP_PER_TC_COUNT = 5
 EXECUTION_STEP_MINUTES = 1
+INITIAL_START_OFFSET_MINUTES = 30
+INITIAL_START_OFFSET_SECONDS = 59
+CREATION_STEP_SECONDS_MIN = 1
+CREATION_STEP_SECONDS_MAX = 59
+EXECUTION_STEP_SECONDS_MIN = 1
+EXECUTION_STEP_SECONDS_MAX = 59
+REPORT_CREATION_ADD_MIN_MINUTES = 2
+REPORT_CREATION_ADD_MAX_MINUTES = 7
 
 JSON_FILE_MAP = {
     "hil": "HIL_FunctionList.json",
@@ -150,13 +159,52 @@ def read_html_soup(html_path: Path):
 class DateState:
     def __init__(self):
         self.creation_dt = parse_report_date(TEST_START_DATE)
-        self.execution_dt = parse_report_date(EXECUTION_START_DATE)
+        self.creation_reset_base_dt = self.creation_dt
+        self.creation_cap_dt = parse_report_date(TEST_END_DATE)
+        self.creation_rng = random.Random(RANDOM_SEED)
+        start_offset = timedelta(
+            minutes=random.randint(0, INITIAL_START_OFFSET_MINUTES),
+            seconds=random.randint(0, INITIAL_START_OFFSET_SECONDS),
+        )
+        self.execution_dt = parse_report_date(EXECUTION_START_DATE) + start_offset
         self.tc_count = 0
 
+    def reset_creation_for_report(self, html_path: Path, first_creation_text: str = "") -> None:
+        start_dt = parse_report_date(TEST_START_DATE)
+        end_dt = parse_report_date(TEST_END_DATE)
+
+        reference_text = clean_text(first_creation_text) or TEST_START_DATE
+        seed_material = f"{html_path.as_posix()}|{reference_text}|{TEST_START_DATE}|{TEST_END_DATE}"
+        seed = sum(ord(ch) for ch in seed_material)
+        self.creation_rng = random.Random(seed)
+
+        candidate = sample_business_datetime(self.creation_rng, start_dt, end_dt)
+
+        if candidate < start_dt:
+            candidate = start_dt
+        if candidate > end_dt:
+            candidate = end_dt
+
+        self.creation_dt = candidate
+        self.creation_reset_base_dt = candidate
+        self.creation_cap_dt = end_dt
+
     def next_creation_date(self) -> str:
+        if self.creation_dt >= self.creation_cap_dt:
+            self.creation_dt = self.creation_reset_base_dt
+
         current = self.creation_dt
-        step = random.randint(CREATION_MIN_STEP_MINUTES, CREATION_MAX_STEP_MINUTES)
-        self.creation_dt += timedelta(minutes=step)
+        next_dt = self.creation_dt + timedelta(
+            minutes=self.creation_rng.randint(CREATION_MIN_STEP_MINUTES, CREATION_MAX_STEP_MINUTES),
+            seconds=self.creation_rng.randint(CREATION_STEP_SECONDS_MIN, CREATION_STEP_SECONDS_MAX),
+        )
+        next_dt = enforce_business_hours(next_dt)
+
+        if next_dt >= self.creation_cap_dt:
+            self.creation_dt = self.creation_reset_base_dt
+        else:
+            self.creation_dt = next_dt
+
         return format_report_date(current)
 
     def next_execution_date(self) -> str:
@@ -164,7 +212,10 @@ class DateState:
 
         self.tc_count += 1
         if self.tc_count % EXECUTION_STEP_PER_TC_COUNT == 0:
-            self.execution_dt += timedelta(minutes=EXECUTION_STEP_MINUTES)
+            self.execution_dt += timedelta(
+                minutes=EXECUTION_STEP_MINUTES,
+                seconds=random.randint(EXECUTION_STEP_SECONDS_MIN, EXECUTION_STEP_SECONDS_MAX),
+            )
 
         return format_report_date(current)
 
@@ -173,8 +224,40 @@ def parse_report_date(text: str) -> datetime.datetime:
     return datetime.datetime.strptime(text, DATE_FORMAT)
 
 
+def enforce_business_hours(dt: datetime.datetime) -> datetime.datetime:
+    if dt.hour < 8:
+        return dt.replace(hour=8, minute=0, second=1)
+
+    if dt.hour >= 20:
+        next_day = dt + timedelta(days=1)
+        return next_day.replace(hour=8, minute=0, second=1)
+
+    return dt
+
+
 def format_report_date(dt: datetime.datetime) -> str:
     return dt.strftime(DATE_FORMAT).upper()
+
+
+def sample_business_datetime(
+    rng: random.Random,
+    start_dt: datetime.datetime,
+    end_dt: datetime.datetime,
+) -> datetime.datetime:
+    day_count = (end_dt.date() - start_dt.date()).days
+
+    for _ in range(500):
+        day_offset = rng.randint(0, max(day_count, 0))
+        day = start_dt.date() + timedelta(days=day_offset)
+
+        sec_of_day = rng.randint((8 * 3600) + 1, (20 * 3600) - 1)
+        candidate = datetime.datetime.combine(day, datetime.time()) + timedelta(seconds=sec_of_day)
+
+        if start_dt <= candidate <= end_dt:
+            return candidate
+
+    fallback = enforce_business_hours(start_dt)
+    return min(fallback, end_dt)
 
 
 # ================================================================
@@ -474,30 +557,19 @@ def replace_user_code_section(
     if row:
         block.append(row)
 
-    p = soup.new_tag("p")
-    p.string = "Inline Function Coverage Inspection"
-    block.append(p)
-
-    if matched_pair:
-        comp, unit = matched_pair
-
-        info = soup.new_tag("p")
-        info.string = f"Component/Unit mapping: {comp} / {unit}"
-        block.append(info)
-
     if uncovered:
+        p = soup.new_tag("p")
+        p.string = "Requirement Analysis"
+        block.append(p)
+
         ol = soup.new_tag("ol")
 
-        for fn in uncovered:
+        for idx, fn in enumerate(uncovered, start=1):
             li = soup.new_tag("li")
-            li.string = f'Inline Function "{fn}" has been covered by inspection.'
+            li.string = f"{idx}) Inline function {fn} has been verified through requirement analysis."
             ol.append(li)
 
         block.append(ol)
-    else:
-        p2 = soup.new_tag("p")
-        p2.string = "No uncovered required inline function was found from the interface mapping."
-        block.append(p2)
 
 
 # ================================================================
@@ -670,9 +742,10 @@ def reorder_toc_testcase_entries(
 def update_tc_display_names_and_dates(
     soup: BeautifulSoup,
     date_state: DateState,
-) -> None:
+) -> Optional[datetime.datetime]:
     tc_counter: Dict[str, int] = {}
     ordered_tc_indices: List[str] = []
+    last_execution_dt: Optional[datetime.datetime] = None
 
     for idx, _, table in find_config_blocks(soup):
         ordered_tc_indices.append(idx)
@@ -691,13 +764,49 @@ def update_tc_display_names_and_dates(
 
         # Keep original Test Case Name in Test Case Configuration.
         set_table_value_by_header(table, "Date of Creation", date_state.next_creation_date())
-        set_table_value_by_header(table, "Date of Execution", date_state.next_execution_date())
+        execution_text = date_state.next_execution_date()
+        set_table_value_by_header(table, "Date of Execution", execution_text)
+        last_execution_dt = parse_report_date(execution_text)
 
         # Change display title and TOC only.
         update_table_of_contents_name(soup, idx, display_name)
         update_testcase_header_name(soup, idx, display_name)
 
     reorder_toc_testcase_entries(soup, ordered_tc_indices)
+    return last_execution_dt
+
+
+def update_report_creation_datetime(
+    soup: BeautifulSoup,
+    base_dt: Optional[datetime.datetime],
+    html_path: Path,
+) -> None:
+    if base_dt is None:
+        return
+
+    anchor = soup.find("a", id="ConfigurationData")
+    if not anchor:
+        return
+
+    block = find_parent_report_block(anchor)
+    if not block:
+        return
+
+    table = block.find("table")
+    if not table:
+        return
+
+    seed = sum(ord(ch) for ch in f"{html_path.as_posix()}|report_creation")
+    rng = random.Random(seed)
+    plus_minutes = rng.randint(REPORT_CREATION_ADD_MIN_MINUTES, REPORT_CREATION_ADD_MAX_MINUTES)
+    report_dt = base_dt + timedelta(minutes=plus_minutes)
+
+    set_table_value_by_header(table, "Date of Report Creation", report_dt.strftime("%d %b %Y").upper())
+    set_table_value_by_header(
+        table,
+        "Time of Report Creation",
+        report_dt.strftime("%I:%M:%S %p").lstrip("0"),
+    )
 
 
 # ================================================================
@@ -810,6 +919,13 @@ def process_html_file(
         covered_functions=covered_functions,
     )
 
+    first_creation_text = ""
+    config_blocks = find_config_blocks(soup)
+    if config_blocks:
+        _, _, first_table = config_blocks[0]
+        first_creation_text = get_table_value_by_header(first_table, "Date of Creation")
+    date_state.reset_creation_for_report(html_path=html_path, first_creation_text=first_creation_text)
+
     t0 = time.perf_counter()
 
     replace_user_code_section(
@@ -818,9 +934,14 @@ def process_html_file(
         matched_pair=matched_pair,
     )
 
-    update_tc_display_names_and_dates(
+    last_execution_dt = update_tc_display_names_and_dates(
         soup=soup,
         date_state=date_state,
+    )
+    update_report_creation_datetime(
+        soup=soup,
+        base_dt=last_execution_dt,
+        html_path=html_path,
     )
 
     clean_requirements_notes(soup)
@@ -914,31 +1035,27 @@ def create_excel(output_path: str):
     ws = wb.active
     ws.title = "TCNames"
 
-    ws.cell(row=1, column=1, value="Source HTML")
-    ws.cell(row=1, column=2, value="TC-Count")
-    ws.cell(row=1, column=3, value="Unit Under Test")
-    ws.cell(row=1, column=4, value="Function Name")
-    ws.cell(row=1, column=5, value="TestCase Name")
+    ws.cell(row=1, column=1, value="TC-Count")
+    ws.cell(row=1, column=2, value="Function Name")
+    ws.cell(row=1, column=3, value="TestCase Name")
 
-    ws.cell(row=1, column=6, value="Input")
-    ws.cell(row=2, column=6, value="Variable")
-    ws.cell(row=2, column=7, value="DataType")
-    ws.cell(row=2, column=8, value="Value")
+    ws.cell(row=1, column=4, value="Input")
+    ws.cell(row=2, column=4, value="Variable")
+    ws.cell(row=2, column=5, value="DataType")
+    ws.cell(row=2, column=6, value="Value")
 
-    ws.cell(row=1, column=9, value="Output")
-    ws.cell(row=2, column=9, value="Variable")
-    ws.cell(row=2, column=10, value="DataType")
-    ws.cell(row=2, column=11, value="Value")
+    ws.cell(row=1, column=7, value="Output")
+    ws.cell(row=2, column=7, value="Variable")
+    ws.cell(row=2, column=8, value="DataType")
+    ws.cell(row=2, column=9, value="Value")
 
     ws.merge_cells("A1:A2")
     ws.merge_cells("B1:B2")
     ws.merge_cells("C1:C2")
-    ws.merge_cells("D1:D2")
-    ws.merge_cells("E1:E2")
-    ws.merge_cells("F1:H1")
-    ws.merge_cells("I1:K1")
+    ws.merge_cells("D1:F1")
+    ws.merge_cells("G1:I1")
 
-    for row in ws.iter_rows(min_row=1, max_row=2, min_col=1, max_col=11):
+    for row in ws.iter_rows(min_row=1, max_row=2, min_col=1, max_col=9):
         for cell in row:
             cell.font = HEADER_FONT
             cell.fill = HEADER_FILL
@@ -952,17 +1069,15 @@ def create_excel(output_path: str):
 
 def auto_fit_columns(ws):
     max_width_map = {
-        1: 45,
-        2: 12,
+        1: 12,
+        2: 45,
         3: 35,
         4: 45,
         5: 35,
-        6: 45,
-        7: 35,
-        8: 50,
-        9: 45,
-        10: 35,
-        11: 50,
+        6: 50,
+        7: 45,
+        8: 35,
+        9: 50,
     }
 
     for col_idx, col_cells in enumerate(ws.iter_cols(), start=1):
@@ -981,7 +1096,7 @@ def auto_fit_columns(ws):
 
 
 def style_body_range(ws):
-    for row in ws.iter_rows(min_row=3, max_row=ws.max_row, min_col=1, max_col=11):
+    for row in ws.iter_rows(min_row=3, max_row=ws.max_row, min_col=1, max_col=9):
         for cell in row:
             cell.border = BODY_BORDER
             cell.alignment = Alignment(vertical="top", wrap_text=True)
@@ -1180,17 +1295,13 @@ def find_testcases(main_scroller):
 def write_testcase_header(
     ws,
     row_idx,
-    source_html,
     tc_count,
-    unit_under_test,
     subprogram,
     tc_name
 ):
-    ws.cell(row=row_idx, column=1, value=source_html)
-    ws.cell(row=row_idx, column=2, value=tc_count)
-    ws.cell(row=row_idx, column=3, value=unit_under_test)
-    ws.cell(row=row_idx, column=4, value=subprogram)
-    ws.cell(row=row_idx, column=5, value=tc_name)
+    ws.cell(row=row_idx, column=1, value=tc_count)
+    ws.cell(row=row_idx, column=2, value=subprogram)
+    ws.cell(row=row_idx, column=3, value=tc_name)
 
 
 def write_data_block(ws, start_row, start_col, items):
@@ -1207,10 +1318,8 @@ def write_data_block(ws, start_row, start_col, items):
 
 def append_testcase_to_sheet(
     ws,
-    source_html,
     tc_count,
     tc_name,
-    unit_under_test,
     subprogram,
     input_items,
     expected_items
@@ -1220,15 +1329,13 @@ def append_testcase_to_sheet(
     write_testcase_header(
         ws=ws,
         row_idx=start_row,
-        source_html=source_html,
         tc_count=tc_count,
-        unit_under_test=unit_under_test,
         subprogram=subprogram,
         tc_name=tc_name
     )
 
-    input_end = write_data_block(ws, start_row, 6, input_items)
-    expected_end = write_data_block(ws, start_row, 9, expected_items)
+    input_end = write_data_block(ws, start_row, 4, input_items)
+    expected_end = write_data_block(ws, start_row, 7, expected_items)
 
     return max(input_end, expected_end)
 
@@ -1237,14 +1344,14 @@ def append_testcase_to_sheet(
 # EXCEL EXTRACTOR - BULK PROCESS
 # ================================================================
 
-def parse_html_file_to_sheet(html_path: Path, ws, global_tc_count: int) -> int:
+def parse_html_file_to_sheet(html_path: Path, ws, file_tc_count: int) -> int:
     soup = read_html_soup(html_path)
 
     main_scroller = find_main_scroller(soup)
     if main_scroller is None:
         logging.warning("main-scroller not found: %s", html_path)
         print(f"[WARN] main-scroller not found: {html_path}")
-        return global_tc_count
+        return file_tc_count
 
     testcases = find_testcases(main_scroller)
 
@@ -1253,7 +1360,7 @@ def parse_html_file_to_sheet(html_path: Path, ws, global_tc_count: int) -> int:
 
     for testcase_div in testcases:
         try:
-            global_tc_count += 1
+            file_tc_count += 1
 
             h2 = testcase_div.find("h2")
             tc_name = ""
@@ -1261,7 +1368,7 @@ def parse_html_file_to_sheet(html_path: Path, ws, global_tc_count: int) -> int:
                 span = h2.find("span")
                 tc_name = get_text(span if span else h2)
 
-            unit_under_test, subprogram = parse_summary_table(testcase_div)
+            _, subprogram = parse_summary_table(testcase_div)
 
             test_data = parse_test_data_section(testcase_div)
             input_items = test_data.get("Input Test Data", [])
@@ -1269,10 +1376,8 @@ def parse_html_file_to_sheet(html_path: Path, ws, global_tc_count: int) -> int:
 
             append_testcase_to_sheet(
                 ws=ws,
-                source_html=html_path.name,
-                tc_count=global_tc_count,
+                tc_count=file_tc_count,
                 tc_name=tc_name,
-                unit_under_test=unit_under_test,
                 subprogram=subprogram,
                 input_items=input_items,
                 expected_items=expected_items
@@ -1281,7 +1386,7 @@ def parse_html_file_to_sheet(html_path: Path, ws, global_tc_count: int) -> int:
         except Exception:
             logging.exception("Failed while parsing testcase in file: %s", html_path)
 
-    return global_tc_count
+    return file_tc_count
 
 
 def process_folder_to_excel():
@@ -1290,55 +1395,56 @@ def process_folder_to_excel():
 
     print(f"[START] {start_time}")
     print(f"[INPUT] {INPUT_ROOT}")
-    print(f"[OUTPUT] {OUTPUT_XLSX_PATH}")
+    print(f"[OUTPUT ROOT] {OUTPUT_XLSX_ROOT}")
 
-    output_path = Path(OUTPUT_XLSX_PATH)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    create_excel(str(output_path))
-
-    wb = openpyxl.load_workbook(output_path)
-    ws = wb["TCNames"]
+    output_root = Path(OUTPUT_XLSX_ROOT)
+    output_root.mkdir(parents=True, exist_ok=True)
 
     html_files = collect_html_files(INPUT_ROOT)
 
     if not html_files:
         print("[WARN] No HTML files found.")
-        wb.save(output_path)
         return
 
     print(f"[FOUND] HTML files: {len(html_files)}")
-
-    global_tc_count = 0
 
     for html_path in html_files:
         file_t0 = time.perf_counter()
         print(f"[PROCESS] {html_path}")
 
         try:
-            global_tc_count = parse_html_file_to_sheet(
+            relative_html_path = html_path.relative_to(Path(INPUT_ROOT))
+            output_xlsx_path = (
+                output_root / relative_html_path.parent / f"{html_path.stem}.xlsx"
+            )
+            output_xlsx_path.parent.mkdir(parents=True, exist_ok=True)
+
+            create_excel(str(output_xlsx_path))
+            wb = openpyxl.load_workbook(output_xlsx_path)
+            ws = wb["TCNames"]
+
+            file_tc_count = parse_html_file_to_sheet(
                 html_path=html_path,
                 ws=ws,
-                global_tc_count=global_tc_count
+                file_tc_count=0
             )
+
+            style_body_range(ws)
+            auto_fit_columns(ws)
+            wb.save(output_xlsx_path)
 
             if ENABLE_TIME_LOG:
                 print(f"  elapsed: {time.perf_counter() - file_t0:.2f}s")
+            print(f"  [XLSX] {output_xlsx_path} (testcases: {file_tc_count})")
 
         except Exception:
             logging.exception("Failed while processing file: %s", html_path)
             print(f"[ERROR] Failed while processing: {html_path}")
 
-    style_body_range(ws)
-    auto_fit_columns(ws)
-
-    wb.save(output_path)
-
     end_time = datetime.datetime.now()
 
     print(f"[DONE] HTML files processed: {len(html_files)}")
-    print(f"[DONE] Testcases extracted: {global_tc_count}")
-    print(f"[DONE] Output: {output_path}")
+    print(f"[DONE] Output root: {output_root}")
     print(f"[END] {end_time}")
     print(f"[TOTAL] {time.perf_counter() - total_t0:.2f}s")
 
