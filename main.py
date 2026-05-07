@@ -39,6 +39,7 @@ LOG_PATH = "UnitTC.log"
 ENABLE_TIME_LOG = True
 
 TEST_START_DATE = "01 MAY 2026  1:00:00 PM"
+TEST_END_DATE = "31 MAY 2026  6:00:00 PM"
 EXECUTION_START_DATE = "04 MAY 2026  9:00:00 AM"
 
 DATE_FORMAT = "%d %b %Y  %I:%M:%S %p"
@@ -155,15 +156,39 @@ def read_html_soup(html_path: Path):
 
 class DateState:
     def __init__(self):
+        self.creation_dt = parse_report_date(TEST_START_DATE)
+        self.creation_reset_base_dt = self.creation_dt
+        self.creation_cap_dt = parse_report_date(TEST_END_DATE)
+        self.creation_rng = random.Random(RANDOM_SEED)
         start_offset = timedelta(
             minutes=random.randint(0, INITIAL_START_OFFSET_MINUTES),
             seconds=random.randint(0, INITIAL_START_OFFSET_SECONDS),
         )
-        self.creation_dt = parse_report_date(TEST_START_DATE) + start_offset
         self.execution_dt = parse_report_date(EXECUTION_START_DATE) + start_offset
-        self.creation_reset_base_dt = parse_report_date(TEST_START_DATE) + start_offset
-        self.creation_cap_dt = parse_report_date(EXECUTION_START_DATE)
         self.tc_count = 0
+
+    def reset_creation_for_report(self, html_path: Path, first_creation_text: str = "") -> None:
+        start_dt = parse_report_date(TEST_START_DATE)
+        end_dt = parse_report_date(TEST_END_DATE)
+
+        reference_text = clean_text(first_creation_text) or TEST_START_DATE
+        seed_material = f"{html_path.as_posix()}|{reference_text}|{TEST_START_DATE}|{TEST_END_DATE}"
+        seed = sum(ord(ch) for ch in seed_material)
+        self.creation_rng = random.Random(seed)
+
+        total_seconds = int((end_dt - start_dt).total_seconds())
+        offset_seconds = self.creation_rng.randint(0, max(total_seconds, 0))
+        candidate = start_dt + timedelta(seconds=offset_seconds)
+        candidate = enforce_business_hours(candidate)
+
+        if candidate < start_dt:
+            candidate = start_dt
+        if candidate > end_dt:
+            candidate = end_dt
+
+        self.creation_dt = candidate
+        self.creation_reset_base_dt = candidate
+        self.creation_cap_dt = end_dt
 
     def next_creation_date(self) -> str:
         if self.creation_dt >= self.creation_cap_dt:
@@ -171,9 +196,10 @@ class DateState:
 
         current = self.creation_dt
         next_dt = self.creation_dt + timedelta(
-            minutes=random.randint(CREATION_MIN_STEP_MINUTES, CREATION_MAX_STEP_MINUTES),
-            seconds=random.randint(CREATION_STEP_SECONDS_MIN, CREATION_STEP_SECONDS_MAX),
+            minutes=self.creation_rng.randint(CREATION_MIN_STEP_MINUTES, CREATION_MAX_STEP_MINUTES),
+            seconds=self.creation_rng.randint(CREATION_STEP_SECONDS_MIN, CREATION_STEP_SECONDS_MAX),
         )
+        next_dt = enforce_business_hours(next_dt)
 
         if next_dt >= self.creation_cap_dt:
             self.creation_dt = self.creation_reset_base_dt
@@ -197,6 +223,17 @@ class DateState:
 
 def parse_report_date(text: str) -> datetime.datetime:
     return datetime.datetime.strptime(text, DATE_FORMAT)
+
+
+def enforce_business_hours(dt: datetime.datetime) -> datetime.datetime:
+    if dt.hour < 8:
+        return dt.replace(hour=8, minute=0, second=0)
+
+    if dt.hour >= 20:
+        next_day = dt + timedelta(days=1)
+        return next_day.replace(hour=8, minute=0, second=0)
+
+    return dt
 
 
 def format_report_date(dt: datetime.datetime) -> str:
@@ -824,6 +861,13 @@ def process_html_file(
         required_functions=required_functions,
         covered_functions=covered_functions,
     )
+
+    first_creation_text = ""
+    config_blocks = find_config_blocks(soup)
+    if config_blocks:
+        _, _, first_table = config_blocks[0]
+        first_creation_text = get_table_value_by_header(first_table, "Date of Creation")
+    date_state.reset_creation_for_report(html_path=html_path, first_creation_text=first_creation_text)
 
     t0 = time.perf_counter()
 
