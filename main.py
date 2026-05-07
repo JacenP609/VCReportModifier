@@ -57,6 +57,8 @@ CREATION_STEP_SECONDS_MIN = 1
 CREATION_STEP_SECONDS_MAX = 59
 EXECUTION_STEP_SECONDS_MIN = 1
 EXECUTION_STEP_SECONDS_MAX = 59
+REPORT_CREATION_ADD_MIN_MINUTES = 2
+REPORT_CREATION_ADD_MAX_MINUTES = 7
 
 JSON_FILE_MAP = {
     "hil": "HIL_FunctionList.json",
@@ -176,10 +178,7 @@ class DateState:
         seed = sum(ord(ch) for ch in seed_material)
         self.creation_rng = random.Random(seed)
 
-        total_seconds = int((end_dt - start_dt).total_seconds())
-        offset_seconds = self.creation_rng.randint(0, max(total_seconds, 0))
-        candidate = start_dt + timedelta(seconds=offset_seconds)
-        candidate = enforce_business_hours(candidate)
+        candidate = sample_business_datetime(self.creation_rng, start_dt, end_dt)
 
         if candidate < start_dt:
             candidate = start_dt
@@ -227,17 +226,38 @@ def parse_report_date(text: str) -> datetime.datetime:
 
 def enforce_business_hours(dt: datetime.datetime) -> datetime.datetime:
     if dt.hour < 8:
-        return dt.replace(hour=8, minute=0, second=0)
+        return dt.replace(hour=8, minute=0, second=1)
 
     if dt.hour >= 20:
         next_day = dt + timedelta(days=1)
-        return next_day.replace(hour=8, minute=0, second=0)
+        return next_day.replace(hour=8, minute=0, second=1)
 
     return dt
 
 
 def format_report_date(dt: datetime.datetime) -> str:
     return dt.strftime(DATE_FORMAT).upper()
+
+
+def sample_business_datetime(
+    rng: random.Random,
+    start_dt: datetime.datetime,
+    end_dt: datetime.datetime,
+) -> datetime.datetime:
+    day_count = (end_dt.date() - start_dt.date()).days
+
+    for _ in range(500):
+        day_offset = rng.randint(0, max(day_count, 0))
+        day = start_dt.date() + timedelta(days=day_offset)
+
+        sec_of_day = rng.randint((8 * 3600) + 1, (20 * 3600) - 1)
+        candidate = datetime.datetime.combine(day, datetime.time()) + timedelta(seconds=sec_of_day)
+
+        if start_dt <= candidate <= end_dt:
+            return candidate
+
+    fallback = enforce_business_hours(start_dt)
+    return min(fallback, end_dt)
 
 
 # ================================================================
@@ -722,9 +742,10 @@ def reorder_toc_testcase_entries(
 def update_tc_display_names_and_dates(
     soup: BeautifulSoup,
     date_state: DateState,
-) -> None:
+) -> Optional[datetime.datetime]:
     tc_counter: Dict[str, int] = {}
     ordered_tc_indices: List[str] = []
+    last_execution_dt: Optional[datetime.datetime] = None
 
     for idx, _, table in find_config_blocks(soup):
         ordered_tc_indices.append(idx)
@@ -743,13 +764,49 @@ def update_tc_display_names_and_dates(
 
         # Keep original Test Case Name in Test Case Configuration.
         set_table_value_by_header(table, "Date of Creation", date_state.next_creation_date())
-        set_table_value_by_header(table, "Date of Execution", date_state.next_execution_date())
+        execution_text = date_state.next_execution_date()
+        set_table_value_by_header(table, "Date of Execution", execution_text)
+        last_execution_dt = parse_report_date(execution_text)
 
         # Change display title and TOC only.
         update_table_of_contents_name(soup, idx, display_name)
         update_testcase_header_name(soup, idx, display_name)
 
     reorder_toc_testcase_entries(soup, ordered_tc_indices)
+    return last_execution_dt
+
+
+def update_report_creation_datetime(
+    soup: BeautifulSoup,
+    base_dt: Optional[datetime.datetime],
+    html_path: Path,
+) -> None:
+    if base_dt is None:
+        return
+
+    anchor = soup.find("a", id="ConfigurationData")
+    if not anchor:
+        return
+
+    block = find_parent_report_block(anchor)
+    if not block:
+        return
+
+    table = block.find("table")
+    if not table:
+        return
+
+    seed = sum(ord(ch) for ch in f"{html_path.as_posix()}|report_creation")
+    rng = random.Random(seed)
+    plus_minutes = rng.randint(REPORT_CREATION_ADD_MIN_MINUTES, REPORT_CREATION_ADD_MAX_MINUTES)
+    report_dt = base_dt + timedelta(minutes=plus_minutes)
+
+    set_table_value_by_header(table, "Date of Report Creation", report_dt.strftime("%d %b %Y").upper())
+    set_table_value_by_header(
+        table,
+        "Time of Report Creation",
+        report_dt.strftime("%I:%M:%S %p").lstrip("0"),
+    )
 
 
 # ================================================================
@@ -877,9 +934,14 @@ def process_html_file(
         matched_pair=matched_pair,
     )
 
-    update_tc_display_names_and_dates(
+    last_execution_dt = update_tc_display_names_and_dates(
         soup=soup,
         date_state=date_state,
+    )
+    update_report_creation_datetime(
+        soup=soup,
+        base_dt=last_execution_dt,
+        html_path=html_path,
     )
 
     clean_requirements_notes(soup)
