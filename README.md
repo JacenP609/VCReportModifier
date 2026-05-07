@@ -64,7 +64,7 @@ Excel 추출만 실행하려면 process_folder_to_excel()만 사용한다.
 Excel 출력은 INPUT_ROOT 기준 상대경로를 그대로 유지하며, HTML 파일 1개당 Excel 파일 1개가 생성된다.
 예: INPUT_ROOT\\A\\B\\sample.html -> OUTPUT_XLSX_ROOT\\A\\B\\sample.xlsx
 
-Excel 시트에서 `Source HTML` 컬럼은 제거되어 더 이상 출력되지 않는다.
+Excel 시트에서 `Source HTML`, `Unit Under Test` 컬럼은 제거되어 더 이상 출력되지 않는다.
 
 주의사항은 다음과 같다.
 

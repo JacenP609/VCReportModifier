@@ -161,14 +161,25 @@ class DateState:
         )
         self.creation_dt = parse_report_date(TEST_START_DATE) + start_offset
         self.execution_dt = parse_report_date(EXECUTION_START_DATE) + start_offset
+        self.creation_reset_base_dt = parse_report_date(TEST_START_DATE) + start_offset
+        self.creation_cap_dt = parse_report_date(EXECUTION_START_DATE)
         self.tc_count = 0
 
     def next_creation_date(self) -> str:
+        if self.creation_dt >= self.creation_cap_dt:
+            self.creation_dt = self.creation_reset_base_dt
+
         current = self.creation_dt
-        self.creation_dt += timedelta(
+        next_dt = self.creation_dt + timedelta(
             minutes=random.randint(CREATION_MIN_STEP_MINUTES, CREATION_MAX_STEP_MINUTES),
             seconds=random.randint(CREATION_STEP_SECONDS_MIN, CREATION_STEP_SECONDS_MAX),
         )
+
+        if next_dt >= self.creation_cap_dt:
+            self.creation_dt = self.creation_reset_base_dt
+        else:
+            self.creation_dt = next_dt
+
         return format_report_date(current)
 
     def next_execution_date(self) -> str:
@@ -919,28 +930,26 @@ def create_excel(output_path: str):
     ws.title = "TCNames"
 
     ws.cell(row=1, column=1, value="TC-Count")
-    ws.cell(row=1, column=2, value="Unit Under Test")
-    ws.cell(row=1, column=3, value="Function Name")
-    ws.cell(row=1, column=4, value="TestCase Name")
+    ws.cell(row=1, column=2, value="Function Name")
+    ws.cell(row=1, column=3, value="TestCase Name")
 
-    ws.cell(row=1, column=5, value="Input")
-    ws.cell(row=2, column=5, value="Variable")
-    ws.cell(row=2, column=6, value="DataType")
-    ws.cell(row=2, column=7, value="Value")
+    ws.cell(row=1, column=4, value="Input")
+    ws.cell(row=2, column=4, value="Variable")
+    ws.cell(row=2, column=5, value="DataType")
+    ws.cell(row=2, column=6, value="Value")
 
-    ws.cell(row=1, column=8, value="Output")
-    ws.cell(row=2, column=8, value="Variable")
-    ws.cell(row=2, column=9, value="DataType")
-    ws.cell(row=2, column=10, value="Value")
+    ws.cell(row=1, column=7, value="Output")
+    ws.cell(row=2, column=7, value="Variable")
+    ws.cell(row=2, column=8, value="DataType")
+    ws.cell(row=2, column=9, value="Value")
 
     ws.merge_cells("A1:A2")
     ws.merge_cells("B1:B2")
     ws.merge_cells("C1:C2")
-    ws.merge_cells("D1:D2")
-    ws.merge_cells("E1:G1")
-    ws.merge_cells("H1:J1")
+    ws.merge_cells("D1:F1")
+    ws.merge_cells("G1:I1")
 
-    for row in ws.iter_rows(min_row=1, max_row=2, min_col=1, max_col=10):
+    for row in ws.iter_rows(min_row=1, max_row=2, min_col=1, max_col=9):
         for cell in row:
             cell.font = HEADER_FONT
             cell.fill = HEADER_FILL
@@ -955,15 +964,14 @@ def create_excel(output_path: str):
 def auto_fit_columns(ws):
     max_width_map = {
         1: 12,
-        2: 35,
-        3: 45,
-        4: 35,
-        5: 45,
-        6: 35,
-        7: 50,
-        8: 45,
-        9: 35,
-        10: 50,
+        2: 45,
+        3: 35,
+        4: 45,
+        5: 35,
+        6: 50,
+        7: 45,
+        8: 35,
+        9: 50,
     }
 
     for col_idx, col_cells in enumerate(ws.iter_cols(), start=1):
@@ -982,7 +990,7 @@ def auto_fit_columns(ws):
 
 
 def style_body_range(ws):
-    for row in ws.iter_rows(min_row=3, max_row=ws.max_row, min_col=1, max_col=10):
+    for row in ws.iter_rows(min_row=3, max_row=ws.max_row, min_col=1, max_col=9):
         for cell in row:
             cell.border = BODY_BORDER
             cell.alignment = Alignment(vertical="top", wrap_text=True)
@@ -1182,14 +1190,12 @@ def write_testcase_header(
     ws,
     row_idx,
     tc_count,
-    unit_under_test,
     subprogram,
     tc_name
 ):
     ws.cell(row=row_idx, column=1, value=tc_count)
-    ws.cell(row=row_idx, column=2, value=unit_under_test)
-    ws.cell(row=row_idx, column=3, value=subprogram)
-    ws.cell(row=row_idx, column=4, value=tc_name)
+    ws.cell(row=row_idx, column=2, value=subprogram)
+    ws.cell(row=row_idx, column=3, value=tc_name)
 
 
 def write_data_block(ws, start_row, start_col, items):
@@ -1208,7 +1214,6 @@ def append_testcase_to_sheet(
     ws,
     tc_count,
     tc_name,
-    unit_under_test,
     subprogram,
     input_items,
     expected_items
@@ -1219,13 +1224,12 @@ def append_testcase_to_sheet(
         ws=ws,
         row_idx=start_row,
         tc_count=tc_count,
-        unit_under_test=unit_under_test,
         subprogram=subprogram,
         tc_name=tc_name
     )
 
-    input_end = write_data_block(ws, start_row, 5, input_items)
-    expected_end = write_data_block(ws, start_row, 8, expected_items)
+    input_end = write_data_block(ws, start_row, 4, input_items)
+    expected_end = write_data_block(ws, start_row, 7, expected_items)
 
     return max(input_end, expected_end)
 
@@ -1241,7 +1245,7 @@ def parse_html_file_to_sheet(html_path: Path, ws, file_tc_count: int) -> int:
     if main_scroller is None:
         logging.warning("main-scroller not found: %s", html_path)
         print(f"[WARN] main-scroller not found: {html_path}")
-        return global_tc_count
+        return file_tc_count
 
     testcases = find_testcases(main_scroller)
 
@@ -1258,7 +1262,7 @@ def parse_html_file_to_sheet(html_path: Path, ws, file_tc_count: int) -> int:
                 span = h2.find("span")
                 tc_name = get_text(span if span else h2)
 
-            unit_under_test, subprogram = parse_summary_table(testcase_div)
+            _, subprogram = parse_summary_table(testcase_div)
 
             test_data = parse_test_data_section(testcase_div)
             input_items = test_data.get("Input Test Data", [])
@@ -1268,7 +1272,6 @@ def parse_html_file_to_sheet(html_path: Path, ws, file_tc_count: int) -> int:
                 ws=ws,
                 tc_count=file_tc_count,
                 tc_name=tc_name,
-                unit_under_test=unit_under_test,
                 subprogram=subprogram,
                 input_items=input_items,
                 expected_items=expected_items
