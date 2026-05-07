@@ -166,6 +166,10 @@ def read_html_soup(html_path: Path):
 # HTML MODIFIER - DATE STATE
 # ================================================================
 
+# ================================================================
+# HTML MODIFIER - DATE STATE
+# ================================================================
+
 class DateState:
     def __init__(self):
         self.creation_dt = parse_report_date(TEST_START_DATE)
