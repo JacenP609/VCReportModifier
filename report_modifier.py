@@ -17,6 +17,51 @@ from openpyxl.styles import Font, PatternFill, Side, Border, Alignment
 from openpyxl.utils import get_column_letter
 
 
+# ================================================================
+# CONFIG
+# ================================================================
+
+ORIGINAL_ROOT = r"C:\Users\hyper.park\PycharmProjects\VCReportModifier\Security"
+NEW_ROOT = r"C:\Users\hyper.park\PycharmProjects\VCReportModifier\SecurityFixed"
+
+SWE4_JSON_ROOT = r"C:\Users\hyper.park\PycharmProjects\VCReportModifier\SWE4_Json"
+
+# Excel extraction input.
+# If you run HTML modification first, keep this as NEW_ROOT.
+INPUT_ROOT = NEW_ROOT
+
+OUTPUT_XLSX_PATH = r"C:\Users\hyper.park\PycharmProjects\VCReportModifier\Security_TCNames.xlsx"
+
+OVERWRITE_NEW_ROOT = True
+RECURSIVE_SEARCH = True
+
+LOG_PATH = "UnitTC.log"
+ENABLE_TIME_LOG = True
+
+TEST_START_DATE = "01 MAY 2026  1:00:00 PM"
+EXECUTION_START_DATE = "04 MAY 2026  9:00:00 AM"
+
+DATE_FORMAT = "%d %b %Y  %I:%M:%S %p"
+
+RANDOM_SEED = 20260506
+
+CREATION_MIN_STEP_MINUTES = 10
+CREATION_MAX_STEP_MINUTES = 20
+
+EXECUTION_STEP_PER_TC_COUNT = 5
+EXECUTION_STEP_MINUTES = 1
+
+JSON_FILE_MAP = {
+    "hil": "HIL_FunctionList.json",
+    "fil": "FIL_FunctionList.json",
+    "security": "Security_FunctionList.json",
+    "ftl": "FTL_FunctionList.json",
+}
+
+JSON_CACHE: Dict[str, Dict[str, Dict[str, List[str]]]] = {}
+
+
+
 # runtime-configurable globals
 ORIGINAL_ROOT=""
 NEW_ROOT=""
@@ -34,6 +79,17 @@ EXECUTION_STEP_MINUTES=1
 JSON_FILE_MAP={}
 JSON_CACHE={}
 ENABLE_TIME_LOG=True
+
+# ================================================================
+# LOGGING / EXCEL STYLE
+# ================================================================
+
+logging.basicConfig(
+    filename=LOG_PATH,
+    filemode="w",
+    level=logging.DEBUG,
+    format="%(asctime)s %(levelname)s %(message)s"
+)
 
 HEADER_FILL = PatternFill("solid", start_color="38E3FF")
 HEADER_FONT = Font(bold=True, size=12, color="0000FF")
@@ -105,6 +161,10 @@ def read_html_soup(html_path: Path):
 
     return BeautifulSoup(html, "html.parser")
 
+
+# ================================================================
+# HTML MODIFIER - DATE STATE
+# ================================================================
 
 # ================================================================
 # HTML MODIFIER - DATE STATE
@@ -886,4 +946,5 @@ def process_all_html_files(config: Dict) -> None:
 
     print(f"[DONE] Processed HTML files: {len(html_files)}")
     print(f"[OUTPUT] {NEW_ROOT}")
+
 
