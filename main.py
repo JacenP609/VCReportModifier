@@ -15,6 +15,8 @@ from bs4 import BeautifulSoup
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Side, Border, Alignment
 from openpyxl.utils import get_column_letter
+from report_modifier import process_all_html_files as run_report_modifier
+from excel_converter import process_folder_to_excel as run_excel_converter
 
 
 # ================================================================
@@ -914,31 +916,29 @@ def create_excel(output_path: str):
     ws = wb.active
     ws.title = "TCNames"
 
-    ws.cell(row=1, column=1, value="Source HTML")
-    ws.cell(row=1, column=2, value="TC-Count")
-    ws.cell(row=1, column=3, value="Unit Under Test")
-    ws.cell(row=1, column=4, value="Function Name")
-    ws.cell(row=1, column=5, value="TestCase Name")
+    ws.cell(row=1, column=1, value="TC-Count")
+    ws.cell(row=1, column=2, value="Unit Under Test")
+    ws.cell(row=1, column=3, value="Function Name")
+    ws.cell(row=1, column=4, value="TestCase Name")
 
-    ws.cell(row=1, column=6, value="Input")
-    ws.cell(row=2, column=6, value="Variable")
-    ws.cell(row=2, column=7, value="DataType")
-    ws.cell(row=2, column=8, value="Value")
+    ws.cell(row=1, column=5, value="Input")
+    ws.cell(row=2, column=5, value="Variable")
+    ws.cell(row=2, column=6, value="DataType")
+    ws.cell(row=2, column=7, value="Value")
 
-    ws.cell(row=1, column=9, value="Output")
-    ws.cell(row=2, column=9, value="Variable")
-    ws.cell(row=2, column=10, value="DataType")
-    ws.cell(row=2, column=11, value="Value")
+    ws.cell(row=1, column=8, value="Output")
+    ws.cell(row=2, column=8, value="Variable")
+    ws.cell(row=2, column=9, value="DataType")
+    ws.cell(row=2, column=10, value="Value")
 
     ws.merge_cells("A1:A2")
     ws.merge_cells("B1:B2")
     ws.merge_cells("C1:C2")
     ws.merge_cells("D1:D2")
-    ws.merge_cells("E1:E2")
-    ws.merge_cells("F1:H1")
-    ws.merge_cells("I1:K1")
+    ws.merge_cells("E1:G1")
+    ws.merge_cells("H1:J1")
 
-    for row in ws.iter_rows(min_row=1, max_row=2, min_col=1, max_col=11):
+    for row in ws.iter_rows(min_row=1, max_row=2, min_col=1, max_col=10):
         for cell in row:
             cell.font = HEADER_FONT
             cell.fill = HEADER_FILL
@@ -952,17 +952,16 @@ def create_excel(output_path: str):
 
 def auto_fit_columns(ws):
     max_width_map = {
-        1: 45,
-        2: 12,
-        3: 35,
-        4: 45,
-        5: 35,
-        6: 45,
-        7: 35,
-        8: 50,
-        9: 45,
-        10: 35,
-        11: 50,
+        1: 12,
+        2: 35,
+        3: 45,
+        4: 35,
+        5: 45,
+        6: 35,
+        7: 50,
+        8: 45,
+        9: 35,
+        10: 50,
     }
 
     for col_idx, col_cells in enumerate(ws.iter_cols(), start=1):
@@ -981,7 +980,7 @@ def auto_fit_columns(ws):
 
 
 def style_body_range(ws):
-    for row in ws.iter_rows(min_row=3, max_row=ws.max_row, min_col=1, max_col=11):
+    for row in ws.iter_rows(min_row=3, max_row=ws.max_row, min_col=1, max_col=10):
         for cell in row:
             cell.border = BODY_BORDER
             cell.alignment = Alignment(vertical="top", wrap_text=True)
@@ -1180,17 +1179,15 @@ def find_testcases(main_scroller):
 def write_testcase_header(
     ws,
     row_idx,
-    source_html,
     tc_count,
     unit_under_test,
     subprogram,
     tc_name
 ):
-    ws.cell(row=row_idx, column=1, value=source_html)
-    ws.cell(row=row_idx, column=2, value=tc_count)
-    ws.cell(row=row_idx, column=3, value=unit_under_test)
-    ws.cell(row=row_idx, column=4, value=subprogram)
-    ws.cell(row=row_idx, column=5, value=tc_name)
+    ws.cell(row=row_idx, column=1, value=tc_count)
+    ws.cell(row=row_idx, column=2, value=unit_under_test)
+    ws.cell(row=row_idx, column=3, value=subprogram)
+    ws.cell(row=row_idx, column=4, value=tc_name)
 
 
 def write_data_block(ws, start_row, start_col, items):
@@ -1207,7 +1204,6 @@ def write_data_block(ws, start_row, start_col, items):
 
 def append_testcase_to_sheet(
     ws,
-    source_html,
     tc_count,
     tc_name,
     unit_under_test,
@@ -1220,15 +1216,14 @@ def append_testcase_to_sheet(
     write_testcase_header(
         ws=ws,
         row_idx=start_row,
-        source_html=source_html,
         tc_count=tc_count,
         unit_under_test=unit_under_test,
         subprogram=subprogram,
         tc_name=tc_name
     )
 
-    input_end = write_data_block(ws, start_row, 6, input_items)
-    expected_end = write_data_block(ws, start_row, 9, expected_items)
+    input_end = write_data_block(ws, start_row, 5, input_items)
+    expected_end = write_data_block(ws, start_row, 8, expected_items)
 
     return max(input_end, expected_end)
 
@@ -1269,7 +1264,6 @@ def parse_html_file_to_sheet(html_path: Path, ws, global_tc_count: int) -> int:
 
             append_testcase_to_sheet(
                 ws=ws,
-                source_html=html_path.name,
                 tc_count=global_tc_count,
                 tc_name=tc_name,
                 unit_under_test=unit_under_test,
@@ -1290,55 +1284,47 @@ def process_folder_to_excel():
 
     print(f"[START] {start_time}")
     print(f"[INPUT] {INPUT_ROOT}")
-    print(f"[OUTPUT] {OUTPUT_XLSX_PATH}")
-
-    output_path = Path(OUTPUT_XLSX_PATH)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    create_excel(str(output_path))
-
-    wb = openpyxl.load_workbook(output_path)
-    ws = wb["TCNames"]
+    print(f"[OUTPUT DIR] {Path(OUTPUT_XLSX_PATH).parent}")
 
     html_files = collect_html_files(INPUT_ROOT)
 
     if not html_files:
         print("[WARN] No HTML files found.")
-        wb.save(output_path)
         return
 
     print(f"[FOUND] HTML files: {len(html_files)}")
 
-    global_tc_count = 0
-
     for html_path in html_files:
         file_t0 = time.perf_counter()
         print(f"[PROCESS] {html_path}")
+        output_path = Path(OUTPUT_XLSX_PATH).parent / f"{html_path.stem}_TCNames.xlsx"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        create_excel(str(output_path))
+        wb = openpyxl.load_workbook(output_path)
+        ws = wb["TCNames"]
 
         try:
-            global_tc_count = parse_html_file_to_sheet(
+            parse_html_file_to_sheet(
                 html_path=html_path,
                 ws=ws,
-                global_tc_count=global_tc_count
+                global_tc_count=0
             )
+
+            style_body_range(ws)
+            auto_fit_columns(ws)
+            wb.save(output_path)
 
             if ENABLE_TIME_LOG:
                 print(f"  elapsed: {time.perf_counter() - file_t0:.2f}s")
+            print(f"  output: {output_path}")
 
         except Exception:
             logging.exception("Failed while processing file: %s", html_path)
             print(f"[ERROR] Failed while processing: {html_path}")
 
-    style_body_range(ws)
-    auto_fit_columns(ws)
-
-    wb.save(output_path)
-
     end_time = datetime.datetime.now()
 
     print(f"[DONE] HTML files processed: {len(html_files)}")
-    print(f"[DONE] Testcases extracted: {global_tc_count}")
-    print(f"[DONE] Output: {output_path}")
     print(f"[END] {end_time}")
     print(f"[TOTAL] {time.perf_counter() - total_t0:.2f}s")
 
@@ -1353,8 +1339,33 @@ def main():
     # ============================================================
     # OPTION 1. Run both steps
     # ============================================================
-    process_all_html_files()
-    process_folder_to_excel()
+    cfg = {
+        "ORIGINAL_ROOT": ORIGINAL_ROOT,
+        "NEW_ROOT": NEW_ROOT,
+        "SWE4_JSON_ROOT": SWE4_JSON_ROOT,
+        "INPUT_ROOT": INPUT_ROOT,
+        "OUTPUT_XLSX_PATH": OUTPUT_XLSX_PATH,
+        "OVERWRITE_NEW_ROOT": OVERWRITE_NEW_ROOT,
+        "RECURSIVE_SEARCH": RECURSIVE_SEARCH,
+        "TEST_START_DATE": TEST_START_DATE,
+        "EXECUTION_START_DATE": EXECUTION_START_DATE,
+        "DATE_FORMAT": DATE_FORMAT,
+        "RANDOM_SEED": RANDOM_SEED,
+        "CREATION_MIN_STEP_MINUTES": CREATION_MIN_STEP_MINUTES,
+        "CREATION_MAX_STEP_MINUTES": CREATION_MAX_STEP_MINUTES,
+        "EXECUTION_STEP_PER_TC_COUNT": EXECUTION_STEP_PER_TC_COUNT,
+        "EXECUTION_STEP_MINUTES": EXECUTION_STEP_MINUTES,
+    }
+
+    run_report_modifier(cfg, clean_text, safe_name, extract_func_name, read_html_soup)
+    run_excel_converter(
+        cfg,
+        read_html_soup=read_html_soup,
+        get_text=get_text,
+        parse_summary_table=parse_summary_table,
+        parse_test_data_section=parse_test_data_section,
+        append_testcase_to_sheet=append_testcase_to_sheet,
+    )
 
     # ============================================================
     # OPTION 2. Run HTML modification only
